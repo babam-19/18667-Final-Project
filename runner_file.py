@@ -9,11 +9,11 @@ import os
 
 from models import ConvNet
 from data_utils import build_mnist
-from train_utils import fl_semidecentralized_cluster_train, fl_centralized_train
+from train_utils import fl_semidecentralized_cluster_train, fl_centralized_train, fl_fullydecentralized_cluster_train
 
 
 
-def plot_acc(accuracies, test_type, labels, title):
+def plot_acc(accuracies, test_type, labels, n_clients, title):
     os.makedirs('plots', exist_ok=True)  # creates 'plots/' if it doesn't exist
     # Plot the accuracies
     plt.figure(figsize=(10, 6))
@@ -22,15 +22,15 @@ def plot_acc(accuracies, test_type, labels, title):
         plt.plot(framework_acc, label = f"{labels[framework_idx]}")
     
     # Add labels and title
-    plt.xlabel('Epochs/Communication Rounds')
+    plt.xlabel('Communication Rounds')
     plt.ylabel('Accuracy')
-    plt.title(title)
+    plt.title(f"{title} ({n_clients} clients total)")
     plt.legend()
     plt.grid(True)
 
-    plt.savefig(f'plots/test_accuracy_{test_type}.png')
+    plt.savefig(f'plots/test_accuracy_{test_type}_{n_clients}clnts.png')
 
-def plot_loss(losses, test_type, labels, title):
+def plot_loss(losses, test_type, labels, n_clients, title):
     os.makedirs('plots', exist_ok=True)  # creates 'plots/' if it doesn't exist
     # Plot the losses
     plt.figure(figsize=(10, 6))
@@ -39,13 +39,31 @@ def plot_loss(losses, test_type, labels, title):
         plt.plot(framework_loss, label = f"{labels[framework_idx]}")
     
     # Add labels and title
-    plt.xlabel('Epochs/Communication Rounds')
+    plt.xlabel('Communication Round Time (in sec)')
     plt.ylabel('Loss')
-    plt.title(title)
+    plt.title(f"{title} ({n_clients} clients total)")
     plt.legend()
     plt.grid(True)
 
-    plt.savefig(f'plots/test_loss_{test_type}.png')
+    plt.savefig(f'plots/test_loss_{test_type}_{n_clients}clnts.png')
+
+
+def plot_comm_times(comm_times, test_type, labels, n_clients, title):
+    os.makedirs('plots', exist_ok=True)  # creates 'plots/' if it doesn't exist
+    # Plot the losses
+    plt.figure(figsize=(10, 6))
+    
+    for framework_idx, framework_comm_times in enumerate(comm_times):
+        plt.plot(framework_comm_times, label = f"{labels[framework_idx]}")
+    
+    # Add labels and title
+    plt.xlabel('Communication Rounds')
+    plt.ylabel('Communication Times')
+    plt.title(f"{title} ({n_clients} clients total)")
+    plt.legend()
+    plt.grid(True)
+
+    plt.savefig(f'plots/test_comm_times_{test_type}_{n_clients}clnts.png')
 
 
 def test_cluster_framework_variations(test_type, args):
@@ -56,25 +74,36 @@ def test_cluster_framework_variations(test_type, args):
     
     if test_type == "equal_num_of_clients_per_cluster":
 
-        # creating our parameter server model for the cluster arch
-        cluster_arch_server_model = ConvNet()
+        # ------------------------
+        # creating the parameter server model for the fully decentralized arch
+        decentralized_arch_server_model = ConvNet()
+        # creating the parameter server model for the decentralized arch
+        accuracies_decentralized_comm, losses_decentralized_comm, times_decentralized_comm = fl_fullydecentralized_cluster_train(decentralized_arch_server_model, client_data, args.comm_rounds, args.lr, args.momentum, args.local_iters, args.straggler_max_delay, testloader)
+        # ------------------------
 
+        # ------------------------
+        # creating the parameter server model for the cluster arch
+        cluster_arch_server_model = ConvNet()
         # our framework
         accuracies_cluster_comm, losses_cluster_comm, times_cluster_comm = fl_semidecentralized_cluster_train(cluster_arch_server_model, client_data, args.comm_rounds, args.lr, args.momentum, args.local_iters, args.straggler_max_delay, testloader, "equal_num_of_clients_per_cluster", num_clusters=5)
-        
-        # creating our parameter server model for the central arch
+        # ------------------------
+
+        # ------------------------
+        # creating the parameter server model for the central arch
         central_arch_server_model = ConvNet()
-        
         # centralized fully sync SGD
         accuracies_central_comm, losses_central_comm, times_central_comm = fl_centralized_train(central_arch_server_model, client_data, args.comm_rounds, args.lr, args.momentum, args.local_iters, args.straggler_max_delay, testloader)
+        # ------------------------
 
-        plot_labels = ["Our Semi-decentralized Framework", "Fully Sync SGD (centralized)"]
-        accuracies = [accuracies_cluster_comm, accuracies_central_comm]
-        losses = [losses_cluster_comm, losses_central_comm]
+        plot_labels = ["Fully Decentralized Framework", "Our Semi-decentralized Framework", "Fully Sync SGD (centralized)"]
+        accuracies = [accuracies_decentralized_comm, accuracies_cluster_comm, accuracies_central_comm]
+        losses = [losses_decentralized_comm, losses_cluster_comm, losses_central_comm]
+        times = [times_decentralized_comm, times_cluster_comm, times_central_comm]
         
         # plot everything
-        plot_acc(accuracies, test_type, plot_labels, 'Accuracy w/ eq num of clients per cluster')
-        plot_loss(losses, test_type, plot_labels, 'Loss w/ eq num of clients per cluster')
+        plot_acc(accuracies, test_type, plot_labels, n_clients, 'Accuracy w/ eq num of clients per cluster')
+        plot_loss(losses, test_type, plot_labels, n_clients, 'Loss w/ eq num of clients per cluster')
+        plot_comm_times(times, test_type, plot_labels, n_clients, 'Communication Times w/ eq num of clients per cluster')
 
         
     # elif test_type == "diff_num_of_clusters":
