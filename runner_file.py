@@ -5,11 +5,47 @@ import torch.optim as optim
 import random 
 import matplotlib.pyplot as plt
 import sys
+import os
 
 from models import ConvNet
 from data_utils import build_mnist
-from train_utils import fl_cluster_train
+from train_utils import fl_semidecentralized_cluster_train, fl_centralized_train
 
+
+
+def plot_acc(accuracies, test_type, labels, title):
+    os.makedirs('plots', exist_ok=True)  # creates 'plots/' if it doesn't exist
+    # Plot the accuracies
+    plt.figure(figsize=(10, 6))
+
+    for framework_idx, framework_acc in enumerate(accuracies):
+        plt.plot(framework_acc, label = f"{labels[framework_idx]}")
+    
+    # Add labels and title
+    plt.xlabel('Epochs/Communication Rounds')
+    plt.ylabel('Accuracy')
+    plt.title(title)
+    plt.legend()
+    plt.grid(True)
+
+    plt.savefig(f'plots/test_accuracy_{test_type}.png')
+
+def plot_loss(losses, test_type, labels, title):
+    os.makedirs('plots', exist_ok=True)  # creates 'plots/' if it doesn't exist
+    # Plot the losses
+    plt.figure(figsize=(10, 6))
+    
+    for framework_idx, framework_loss in enumerate(losses):
+        plt.plot(framework_loss, label = f"{labels[framework_idx]}")
+    
+    # Add labels and title
+    plt.xlabel('Epochs/Communication Rounds')
+    plt.ylabel('Loss')
+    plt.title(title)
+    plt.legend()
+    plt.grid(True)
+
+    plt.savefig(f'plots/test_loss_{test_type}.png')
 
 
 def test_cluster_framework_variations(test_type, args):
@@ -18,10 +54,29 @@ def test_cluster_framework_variations(test_type, args):
     # get all of the client data and the testloader
     client_data, testloader = build_mnist(n_clients, args.iid_alpha, args.batch_size, seed=args.seed)
     
-    # creating our parameter server model
-    server_model = ConvNet()
     if test_type == "equal_num_of_clients_per_cluster":
-        accuracies_cluster_comm, times_cluster_comm = fl_cluster_train(server_model, client_data, args.comm_rounds, args.lr, args.momentum, args.local_iters, args.straggler_max_delay, testloader, "equal_num_of_clients_per_cluster", num_clusters=5)
+
+        # creating our parameter server model for the cluster arch
+        cluster_arch_server_model = ConvNet()
+
+        # our framework
+        accuracies_cluster_comm, losses_cluster_comm, times_cluster_comm = fl_semidecentralized_cluster_train(cluster_arch_server_model, client_data, args.comm_rounds, args.lr, args.momentum, args.local_iters, args.straggler_max_delay, testloader, "equal_num_of_clients_per_cluster", num_clusters=5)
+        
+        # creating our parameter server model for the central arch
+        central_arch_server_model = ConvNet()
+        
+        # centralized fully sync SGD
+        accuracies_central_comm, losses_central_comm, times_central_comm = fl_centralized_train(central_arch_server_model, client_data, args.comm_rounds, args.lr, args.momentum, args.local_iters, args.straggler_max_delay, testloader)
+
+        plot_labels = ["Our Semi-decentralized Framework", "Fully Sync SGD (centralized)"]
+        accuracies = [accuracies_cluster_comm, accuracies_central_comm]
+        losses = [losses_cluster_comm, losses_central_comm]
+        
+        # plot everything
+        plot_acc(accuracies, test_type, plot_labels, 'Accuracy w/ eq num of clients per cluster')
+        plot_loss(losses, test_type, plot_labels, 'Loss w/ eq num of clients per cluster')
+
+        
     # elif test_type == "diff_num_of_clusters":
     #     # TODO 
     #     pass
@@ -65,7 +120,7 @@ def test_cluster_comm_vs_gossip_comm(args):
 
         # train our framework
         # get the accuracies and timing
-        accuracies_cluster_comm, times_cluster_comm = fl_cluster_train(server_model, client_data, args.comm_rounds, args.lr, args.momentum, args.local_iters, args.straggler_max_delay, testloader, "equal_num_of_clients_per_cluster", num_clusters=5)
+        accuracies_cluster_comm, times_cluster_comm = fl_semidecentralized_cluster_train(server_model, client_data, args.comm_rounds, args.lr, args.momentum, args.local_iters, args.straggler_max_delay, testloader, "equal_num_of_clients_per_cluster", num_clusters=5)
 
         # train centralized fedavg framework
         # get the accuracies and timing
@@ -86,9 +141,9 @@ def main(args):
 
     # TESTING OUR FRAMWORK WITH VARIATIONS OF THE ARCHITECTURE
     # test equal amount of number of clients per cluster
-    print("TEST 1: Testing when there are an equal amount of clients in a cluster")
+    print("TEST 1: Testing when there are an equal amount of clients in a cluster vs the baseline fully sunc SGD")
     test_cluster_framework_variations("equal_num_of_clients_per_cluster", args)
-    print("DOne with TEST 1")
+    print("Done with TEST 1")
     
     # # test the number of clients in a given cluster (iid spread of clients in a cluster vs non iid)
     # test_cluster_framework_variations("diff_num_of_clients_per_cluster", args)
