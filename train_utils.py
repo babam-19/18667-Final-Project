@@ -82,6 +82,34 @@ def train_clients(client_ls, client_opt_ls, client_data_ls, local_iters, straggl
 
     return np.mean(total_training_loss)
 
+def eval_model(model_to_eval, test_dataloader):
+    """
+    Evaluates a given model using test data (taking the validation accuracy and the loss of the model)
+    
+    Args:
+        model_to_eval (torch.nn.Module): The model that will be evaluated 
+        test_dataloader (DataLoader): Test data used for the evaluation/validation
+    
+    Returns:
+        (int, int): validation accuracy, validation loss
+    """
+     # test/evaluation
+    validation_acc = []
+    validation_loss = []
+    for i, (test_batch_input, test_batch_target) in enumerate(test_dataloader):
+        # get the prediction from the server model
+        test_batch_pred = model_to_eval(test_batch_input)
+
+        val_loss = torch.nn.functional.cross_entropy(test_batch_pred, test_batch_target)
+        validation_loss.append(val_loss.detach().numpy()) # help for me to keep track of the validation loss
+        
+        # append the accuracy to the validation accuracy
+        test_batch_pred_labels = torch.argmax(test_batch_pred.detach(), dim=1).numpy() # get the labels for the prediction
+        eval_accuracy = np.sum((test_batch_pred_labels == test_batch_target.numpy())/test_batch_input.shape[0])
+        validation_acc.append(eval_accuracy)
+
+    return np.mean(validation_acc), np.mean(validation_loss)
+
 
 def get_mixing_matrix(graph_type, num_clients):
     if graph_type == 'dense':
@@ -89,35 +117,6 @@ def get_mixing_matrix(graph_type, num_clients):
         mixing_matrix = np.ones((num_clients, num_clients)) / num_clients # TODO: change to a torch tensor for speed?
     return mixing_matrix
 
-# def exchange_client_to_client_info_for_cluster(cluster_idx, clients_per_cluster, clients_in_clusters_ls):
-#     num_clients_in_current_cluster = clients_per_cluster[cluster_idx]
-#     clients_in_current_cluster = clients_in_clusters_ls[cluster_idx]
-#     mixing_matrix = get_mixing_matrix("dense", num_clients_in_current_cluster)
-
-#     with torch.no_grad():
-#         # grabbing each param from each model
-#         client_params = []
-#         for model in clients_in_current_cluster:
-#             params = {name: param.clone().detach() for name, param in model.named_parameters()}
-#             client_params.append(params)
-        
-#         # mixing eeach layer's weights and adding to mixed_params
-#         mixed_params = []
-#         for i in range(num_clients_in_current_cluster):
-#             mixed = {}
-#             for name in client_params[0].keys():
-                
-#                 # stacking all client parameters for a given layer
-#                 stacked = torch.stack([client_params[j][name] for j in range(num_clients_in_current_cluster)])
-                
-#                 # weighted sum using mixing matrix row i
-#                 mixed[name] = sum(mixing_matrix[i, j] * stacked[j] for j in range(num_clients_in_current_cluster))
-           
-#             mixed_params.append(mixed)
-
-#         for i, model in enumerate(clients_in_current_cluster):
-#             for name, param in model.named_parameters():
-#                 param.data.copy_(mixed_params[i][name])
 
 def exchange_client_to_client_info(clients, n_clients):
     mixing_matrix = get_mixing_matrix("dense", n_clients)
@@ -225,19 +224,6 @@ def agg_models_at_ps_for_central_arch(server_model, clients):
             for layer_idx, (name, parameter) in enumerate(model.named_parameters()):
                 parameter.copy_(all_model_params[layer_idx])
 
-    
-
-# def find_true_client_idx(cluster_to_cluster_client_idxs, clients_per_cluster):
-#     """Will get the correct indexes for each client out of all the clients (not just from the clients in a goven cluster)"""
-#     true_client_idxs = []
-#     for cluster_idx, client_idx in enumerate(cluster_to_cluster_client_idxs):
-#         if cluster_idx == 0:
-#             true_client_idxs.append(client_idx)
-#         else:
-#             true_client_idxs.append(sum(clients_per_cluster[:cluster_idx]) + client_idx)
-
-#     return true_client_idxs
-
 
 def setup_client_cluster_arch(main_test_type, num_clusters, ls_of_clients, ls_of_client_opts, ls_of_client_data):
     clients_in_clusters_ls = None
@@ -275,7 +261,6 @@ def fl_semidecentralized_cluster_train(server_model, client_data, comm_rounds, l
     client_opts = [optim.SGD(a_client.parameters(), lr=lr, momentum=momentum) for a_client in client_list]
     
     # getting the proper number of clients in a cluster depending on the test type
-
     clients_in_clusters_ls, client_opts_in_clusters_ls, clients_per_cluster,  client_data_in_clusters_ls = setup_client_cluster_arch(main_test_type, num_clusters, client_list, client_opts, client_data)
 
     
@@ -312,23 +297,9 @@ def fl_semidecentralized_cluster_train(server_model, client_data, comm_rounds, l
         round_end_time = time.time()
 
         # test/evaluation
-        validation_acc = []
-        validation_loss = []
-        for i, (test_batch_input, test_batch_target) in enumerate(testloader):
-            # get the prediction from the server model
-            test_batch_pred = server_model(test_batch_input)
-
-            val_loss = torch.nn.functional.cross_entropy(test_batch_pred, test_batch_target)
-            validation_loss.append(val_loss.detach().numpy()) # help for me to keep track of the validation loss
-            
-            # append the accuracy to the validation accuracy
-            test_batch_pred_labels = torch.argmax(test_batch_pred.detach(), dim=1).numpy() # get the labels for the prediction
-            eval_accuracy = np.sum((test_batch_pred_labels == test_batch_target.numpy())/test_batch_input.shape[0])
-            validation_acc.append(eval_accuracy)
-        
-        total_val_loss = np.mean(validation_loss)
+        total_accuracy, total_val_loss = eval_model(server_model, testloader)
         total_train_loss = np.mean(per_cluster_loss)
-        total_accuracy = np.mean(validation_acc)
+
         accuracies.append(total_accuracy)
         losses.append(total_train_loss)
         times.append(round_end_time - round_start_time)
@@ -366,31 +337,17 @@ def fl_fullydecentralized_cluster_train(starting_model, client_data, comm_rounds
 
         # train each client
         all_client_loss = train_clients(client_list, client_opts, client_data, local_iters, straggler_max_delay)
-        exchange_client_to_client_info(client_list, num_of_clients)
-        
+
+        # no aggregation at a central server, just exhange information between neighbors
+        exchange_client_to_client_info(client_list, num_of_clients) 
 
         # our ending time
         round_end_time = time.time()
 
-
-        # test/evaluation
-        validation_acc = []
-        validation_loss = []
-        for i, (test_batch_input, test_batch_target) in enumerate(testloader):
-            # get the prediction from the server model
-            test_batch_pred = client_list[0](test_batch_input)
-
-            val_loss = torch.nn.functional.cross_entropy(test_batch_pred, test_batch_target)
-            validation_loss.append(val_loss.detach().numpy()) # help for me to keep track of the validation loss
-            
-            # append the accuracy to the validation accuracy
-            test_batch_pred_labels = torch.argmax(test_batch_pred.detach(), dim=1).numpy() # get the labels for the prediction
-            eval_accuracy = np.sum((test_batch_pred_labels == test_batch_target.numpy())/test_batch_input.shape[0])
-            validation_acc.append(eval_accuracy)
-        
-        total_val_loss = np.mean(validation_loss)
+        # test/evaluation (just taking the first model and evaluating that one)
+        total_accuracy, total_val_loss = eval_model(client_list[0], testloader)
         total_train_loss = all_client_loss
-        total_accuracy = np.mean(validation_acc)
+
         accuracies.append(total_accuracy)
         losses.append(total_train_loss)
         times.append(round_end_time - round_start_time)
@@ -399,93 +356,8 @@ def fl_fullydecentralized_cluster_train(starting_model, client_data, comm_rounds
         
     return accuracies, losses, times
 
-# # TODO:
-# def fl_fullydecentralized_cluster_train(server_model, client_data, comm_rounds, lr, momentum, local_iters, straggler_max_delay, testloader, main_test_type = "equal_num_of_clients_per_cluster", num_clusters = 5):
-#     accuracies = []
-#     losses = []
-#     times = []
-
-#     print("In function: fl_fullydecentralized_cluster_train")
-#     print(f"Communication Rounds = {comm_rounds}")
-#     print(f"Local iterations = {local_iters}\n\n")
-    
-#     # initially making the copy of the server model for each client
-#     num_of_clients = len(client_data)
-#     client_list = [copy.deepcopy(server_model) for i in range(num_of_clients)]
-#     client_opts = [optim.SGD(a_client.parameters(), lr=lr, momentum=momentum) for a_client in client_list]
-    
-#     # getting the proper number of clients in a cluster depending on the test type
-#     clients_in_clusters_ls = None
-#     client_opts_in_clusters_ls = None
-#     clients_per_cluster = None
-#     if main_test_type == "equal_num_of_clients_per_cluster":
-#         clients_in_clusters_ls = np.array_split(np.array(client_list), indices_or_sections=num_clusters)
-#         client_opts_in_clusters_ls = np.array_split(np.array(client_opts), indices_or_sections=num_clusters)
-#         client_data_in_clusters_ls = np.array_split(np.array(client_data), indices_or_sections=num_clusters)
-#         clients_per_cluster = [len(single_cluster) for single_cluster in clients_in_clusters_ls]
-#     elif main_test_type == "diff_num_of_clients_per_cluster":
-#         # TODO
-#         pass
-#     elif main_test_type == "diff_num_of_clusters":
-#         # TODO
-#         pass
-    
-#     print(f"Num clients = {num_of_clients} with {num_clusters} clusters and about {np.mean(clients_per_cluster)} clients to a cluster")
-#     print(f"Num participating clients = {num_of_clients}")
 
 
-
-#     for current_round in range(comm_rounds):
-#         # will contain [chosen_client_idx_in_the_cluster]
-#         # ex: [5, 7, ...] means that from cluster 0, the client chosen for aggregation is client 5
-#         #                            from cluster 1, the client chosen for aggregation is client 7... etc
-#         randomly_chosen_clients = []
-
-#         # train each cluster and exchange the information amongst the clients in a cluster
-#         per_cluster_loss = []
-#         for cluster_idx in range(num_clusters):
-#             cluster_loss = train_cluster(cluster_idx, clients_per_cluster, clients_in_clusters_ls, client_opts_in_clusters_ls, client_data_in_clusters_ls, local_iters, straggler_max_delay)
-#             per_cluster_loss.append(cluster_loss)
-#             exchange_cluster_to_cluster_info(cluster_idx, clients_per_cluster, clients_in_clusters_ls)
-            
-#              # pick a random client from a cluster to use for parameter server aggregation
-#             num_clients_in_cluster = clients_per_cluster[cluster_idx]
-#             randomly_chosen_clients.append(np.random.randint(0, num_clients_in_cluster))
-        
-#         # aggregate at the PS and update the randomly chosen models
-#         agg_models_at_ps_for_cluster_arch(server_model, randomly_chosen_clients, clients_in_clusters_ls)
-
-
-#         # test/evaluation
-#         validation_acc = []
-#         validation_loss = []
-#         for i, (test_batch_input, test_batch_target) in enumerate(testloader):
-#             # get the prediction from the server model
-#             test_batch_pred = server_model(test_batch_input)
-
-#             val_loss = torch.nn.functional.cross_entropy(test_batch_pred, test_batch_target)
-#             validation_loss.append(val_loss.detach().numpy()) # help for me to keep track of the validation loss
-            
-#             # append the accuracy to the validation accuracy
-#             test_batch_pred_labels = torch.argmax(test_batch_pred.detach(), dim=1).numpy() # get the labels for the prediction
-#             eval_accuracy = np.sum((test_batch_pred_labels == test_batch_target.numpy())/test_batch_input.shape[0])
-#             validation_acc.append(eval_accuracy)
-        
-#         total_val_loss = np.mean(validation_loss)
-#         total_train_loss = np.mean(per_cluster_loss)
-#         total_accuracy = np.mean(validation_acc)
-#         accuracies.append(total_accuracy)
-#         losses.append(total_train_loss)
-
-#         print(f"ROUND {current_round} - Total Training Loss: {total_train_loss:.5f} / Val Loss: {total_val_loss:5f} / Accuracy: {total_accuracy*100:5f}%")
-#         print(f"Training Loss Per Cluster: ")
-#         for idx, loss in enumerate(per_cluster_loss):
-#             print(f"Cluster {idx} Loss = {loss}")
-
-#     return accuracies, losses, times
-
-
-# TODO:
 def fl_centralized_train(server_model, client_data, comm_rounds, lr, momentum, local_iters, straggler_max_delay, testloader):
 
     accuracies = []
@@ -519,25 +391,10 @@ def fl_centralized_train(server_model, client_data, comm_rounds, lr, momentum, l
         # our ending time
         round_end_time = time.time()
 
-
         # test/evaluation
-        validation_acc = []
-        validation_loss = []
-        for i, (test_batch_input, test_batch_target) in enumerate(testloader):
-            # get the prediction from the server model
-            test_batch_pred = server_model(test_batch_input)
-
-            val_loss = torch.nn.functional.cross_entropy(test_batch_pred, test_batch_target)
-            validation_loss.append(val_loss.detach().numpy()) # help for me to keep track of the validation loss
-            
-            # append the accuracy to the validation accuracy
-            test_batch_pred_labels = torch.argmax(test_batch_pred.detach(), dim=1).numpy() # get the labels for the prediction
-            eval_accuracy = np.sum((test_batch_pred_labels == test_batch_target.numpy())/test_batch_input.shape[0])
-            validation_acc.append(eval_accuracy)
-        
-        total_val_loss = np.mean(validation_loss)
+        total_accuracy, total_val_loss = eval_model(server_model, testloader)
         total_train_loss = all_client_loss
-        total_accuracy = np.mean(validation_acc)
+
         accuracies.append(total_accuracy)
         losses.append(total_train_loss)
         times.append(round_end_time - round_start_time)
