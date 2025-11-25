@@ -8,7 +8,7 @@ import random
 
 def build_mnist(n_clients, alpha, batch_size, seed):
     """
-    Builds the MNIST dataset for either centralized or federated learning scenarios.
+    Builds the MNIST dataset for the various test scenarios we have.
     
     Args:
         n_clients (int): The number of clients for federated learning. If 1, centralized training is performed.
@@ -18,11 +18,7 @@ def build_mnist(n_clients, alpha, batch_size, seed):
         seed (int): torch random seed 
         
     Returns:
-        If `n_clients == 1`:
-            Tuple[DataLoader, DataLoader]: Returns a tuple containing the training and testing DataLoader 
-                                           for centralized training.
-        If `n_clients > 1`:
-            Tuple[List[DataLoader], DataLoader]: Returns a tuple containing a list of DataLoaders for each client 
+        Tuple[List[DataLoader], DataLoader]: Returns a tuple containing a list of DataLoaders for each client 
                                                  (training data) and a single DataLoader for testing data.
     """
     transform = transforms.Compose([
@@ -32,22 +28,14 @@ def build_mnist(n_clients, alpha, batch_size, seed):
     trainset = torchvision.datasets.MNIST(root='./data', train=True, download=True, transform=transform)
     testset = torchvision.datasets.MNIST(root='./data', train=False, download=True, transform=transform)
 
-    N = len(trainset)
     Y = np.array(trainset.targets)
-    n_classes = 10
-    
-    # Centralized training case 
-    if n_clients == 1: 
-        trainloader = DataLoader(dataset=trainset, batch_size=batch_size, shuffle=True)
-        testloader = DataLoader(dataset=testset, batch_size=batch_size, shuffle=False)
-        return trainloader, testloader
 
     clients = partition_dataset(trainset, Y, n_clients, alpha)
     clientloaders = [DataLoader(client, batch_size=batch_size, shuffle=True) for client in clients]
     testloader = DataLoader(testset, batch_size=batch_size, shuffle=False)
     return clientloaders, testloader
 
-# ------------ BA Helper functions for partition_dataset
+# ------------ Helper functions for partition_dataset
 
 def find_class_indexes(data_targets, shuffle=False):
     """

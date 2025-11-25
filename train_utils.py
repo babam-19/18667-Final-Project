@@ -7,19 +7,38 @@ from scipy.stats import truncexpon
 import time
 
 
-def sample_straggler_delay(max_delay, mean_delay, size):
+def sample_straggler_delay(max_delay, num_clients, mean_delay=0.5):
     """Helps to sample the straggler communication delay times while bounding the max time"""
     b = max_delay / mean_delay
-    return truncexpon(b=b, scale=mean_delay).rvs(size)
+    return truncexpon(b=b, scale=mean_delay).rvs(num_clients)
 
-def train_cluster(cluster_idx, clients_per_cluster, clients_in_clusters_ls, client_opts_in_clusters_ls, client_data_in_clusters_ls, local_iters, straggler_max_delay):
+def train_cluster(cluster_idx, clients_per_cluster, clients_in_clusters_ls, client_opts_in_clusters_ls, client_data_in_clusters_ls, local_iters):
+    """
+    Trains all clients within a specified cluster for a fixed number of local iterations 
+    and returns the average training loss across those clients.
+
+    Args:
+        cluster_idx (int): Index of the cluster to train.
+        clients_per_cluster (list[int]): List containing the number of clients in each cluster.
+        clients_in_clusters_ls (list[list[torch.nn.Module]]): Nested list of client models 
+            grouped by cluster.
+        client_opts_in_clusters_ls (list[list[torch.optim.Optimizer]]): Nested list of optimizers 
+            corresponding to each client model in each cluster.
+        client_data_in_clusters_ls (list[list[DataLoader]]): Nested list of dataloaders containing 
+            training data for each client in each cluster.
+        local_iters (int): Maximum number of local training iterations per client.
+
+    Returns:
+        float: The mean training loss across all clients in the specified cluster.
+    """
+
     num_clients_in_current_cluster = clients_per_cluster[cluster_idx]
     clients_in_current_cluster = clients_in_clusters_ls[cluster_idx]
     client_opts_in_current_cluster = client_opts_in_clusters_ls[cluster_idx]
     client_data_for_current_cluster = client_data_in_clusters_ls[cluster_idx]
 
     total_training_loss = []
-    # TODO: wait on implementing the straggler time delay
+
     for model_idx in range(num_clients_in_current_cluster):
         # get the model specific information then train the model
         trainloader = client_data_for_current_cluster[model_idx]
@@ -49,10 +68,9 @@ def train_cluster(cluster_idx, clients_per_cluster, clients_in_clusters_ls, clie
 
     return np.mean(total_training_loss)
 
-def train_clients(client_ls, client_opt_ls, client_data_ls, local_iters, straggler_max_delay):
+def train_clients(client_ls, client_opt_ls, client_data_ls, local_iters):
     
     total_training_loss = []
-    # TODO: wait on implementing the straggler time delay
     for model_idx in range(len(client_ls)):
         # get the model specific information then train the model
         trainloader = client_data_ls[model_idx]
@@ -114,7 +132,7 @@ def eval_model(model_to_eval, test_dataloader):
 def get_mixing_matrix(graph_type, num_clients):
     if graph_type == 'dense':
         # mixing matrix for dense communication graph (which is the only one we are considering in this case)
-        mixing_matrix = np.ones((num_clients, num_clients)) / num_clients # TODO: change to a torch tensor for speed?
+        mixing_matrix = torch.ones((num_clients, num_clients)) / num_clients
     return mixing_matrix
 
 
@@ -230,8 +248,11 @@ def setup_client_cluster_arch(main_test_type, num_clusters, ls_of_clients, ls_of
     client_opts_in_clusters_ls = None
     clients_per_cluster = None
     client_data_in_clusters_ls = None
+
+    # tests in the main runner file that require an equal number of clients per cluster
+    eq_clients_per_cluster = ["T1_eval_against_baselines", "T2_change_num_of_clusters", "T3_scale_up_num_of_clients"]
     
-    if main_test_type == "equal_num_of_clients_per_cluster":
+    if main_test_type in eq_clients_per_cluster:
         clients_in_clusters_ls = np.array_split(np.array(ls_of_clients), indices_or_sections=num_clusters)
         client_opts_in_clusters_ls = np.array_split(np.array(ls_of_client_opts), indices_or_sections=num_clusters)
         client_data_in_clusters_ls = np.array_split(np.array(ls_of_client_data), indices_or_sections=num_clusters)
@@ -246,7 +267,7 @@ def setup_client_cluster_arch(main_test_type, num_clusters, ls_of_clients, ls_of
     return clients_in_clusters_ls, client_opts_in_clusters_ls, clients_per_cluster,  client_data_in_clusters_ls
 
 
-def fl_semidecentralized_cluster_train(server_model, client_data, comm_rounds, lr, momentum, local_iters, straggler_max_delay, testloader, main_test_type = "equal_num_of_clients_per_cluster", num_clusters = 5):
+def fl_semidecentralized_cluster_train(server_model, client_data, comm_rounds, lr, momentum, local_iters, straggler_max_delay, testloader, main_test_type = "eval_against_baselines", num_clusters = 5):
     accuracies = []
     losses = []
     times = []
@@ -267,8 +288,22 @@ def fl_semidecentralized_cluster_train(server_model, client_data, comm_rounds, l
     print(f"Num clients = {num_of_clients} with {num_clusters} clusters and about {np.mean(clients_per_cluster)} clients to a cluster")
     print(f"Num participating clients = {num_of_clients}")
 
+    if straggler_max_delay > 0:
+        print(f"Incorporating straggler delay (max straggler delay = {straggler_max_delay})")
+
 
     for current_round in range(comm_rounds):
+        
+        # if we are using/enforcing straggler delay then get the times for each cluster
+        if straggler_max_delay > 0:
+            # get the straggler times for each cluster
+            time_delay_per_cluster = []
+            for cluster_sizes in clients_per_cluster:
+                time_delay_per_cluster.append(np.sum(sample_straggler_delay(straggler_max_delay, cluster_sizes)))
+            
+            # get the total time delay for all of the clusters
+            total_time_delay = np.sum(time_delay_per_cluster)
+
         # our starting time
         round_start_time = time.time()
 
@@ -280,7 +315,7 @@ def fl_semidecentralized_cluster_train(server_model, client_data, comm_rounds, l
         # train each cluster and exchange the information amongst the clients in a cluster
         per_cluster_loss = []
         for cluster_idx in range(num_clusters):
-            cluster_loss = train_cluster(cluster_idx, clients_per_cluster, clients_in_clusters_ls, client_opts_in_clusters_ls, client_data_in_clusters_ls, local_iters, straggler_max_delay)
+            cluster_loss = train_cluster(cluster_idx, clients_per_cluster, clients_in_clusters_ls, client_opts_in_clusters_ls, client_data_in_clusters_ls, local_iters)
             per_cluster_loss.append(cluster_loss)
             num_clients_in_current_cluster = clients_per_cluster[cluster_idx]
             clients_in_current_cluster = clients_in_clusters_ls[cluster_idx]
@@ -293,8 +328,13 @@ def fl_semidecentralized_cluster_train(server_model, client_data, comm_rounds, l
         # aggregate at the PS and update the randomly chosen models
         agg_models_at_ps_for_cluster_arch(server_model, randomly_chosen_clients, clients_in_clusters_ls)
 
-        # our ending time
-        round_end_time = time.time()
+        # our ending time (changes depending on whether we are enforcing straggler delay)
+        if straggler_max_delay > 0:
+            # if we enforce straggler delay, then add the additional time to reflect that
+            round_end_time = time.time() + total_time_delay
+        else:
+            # otherwise use the time that was recorded as is
+            round_end_time = time.time()
 
         # test/evaluation
         total_accuracy, total_val_loss = eval_model(server_model, testloader)
@@ -328,21 +368,33 @@ def fl_fullydecentralized_cluster_train(starting_model, client_data, comm_rounds
     
     print(f"Num clients = {num_of_clients}")
     print(f"Num participating clients = {num_of_clients}")
-
+    
+    if straggler_max_delay > 0:
+        print(f"Incorporating straggler delay (max straggler delay = {straggler_max_delay})")
 
     for current_round in range(comm_rounds):
-
+        
+        # if we are using/enforcing straggler delay then get the times for each client
+        if straggler_max_delay > 0:
+            # get the total time delay for all of the clients
+            total_time_delay = np.sum(sample_straggler_delay(straggler_max_delay, num_of_clients))
+            
         # our starting time
         round_start_time = time.time()
 
         # train each client
-        all_client_loss = train_clients(client_list, client_opts, client_data, local_iters, straggler_max_delay)
+        all_client_loss = train_clients(client_list, client_opts, client_data, local_iters)
 
         # no aggregation at a central server, just exhange information between neighbors
         exchange_client_to_client_info(client_list, num_of_clients) 
 
-        # our ending time
-        round_end_time = time.time()
+        # our ending time (changes depending on whether we are enforcing straggler delay)
+        if straggler_max_delay > 0:
+            # if we enforce straggler delay, then add the additional time to reflect that
+            round_end_time = time.time() + total_time_delay
+        else:
+            # otherwise use the time that was recorded as is
+            round_end_time = time.time()
 
         # test/evaluation (just taking the first model and evaluating that one)
         total_accuracy, total_val_loss = eval_model(client_list[0], testloader)
@@ -376,20 +428,33 @@ def fl_centralized_train(server_model, client_data, comm_rounds, lr, momentum, l
     print(f"Num clients = {num_of_clients} ")
     print(f"Num participating clients = {num_of_clients}")
 
+    if straggler_max_delay > 0:
+        print(f"Incorporating straggler delay (max straggler delay = {straggler_max_delay})")
+
 
     for current_round in range(comm_rounds):
+        
+        # if we are using/enforcing straggler delay then get the times for each client
+        if straggler_max_delay > 0:
+            # get the total time delay for all of the clients
+            total_time_delay = np.sum(sample_straggler_delay(straggler_max_delay, num_of_clients))
 
         # our starting time
         round_start_time = time.time()
 
         # train each client
-        all_client_loss = train_clients(client_list, client_opts, client_data, local_iters, straggler_max_delay)
+        all_client_loss = train_clients(client_list, client_opts, client_data, local_iters)
 
         # aggregate at the PS and update the all of the models
         agg_models_at_ps_for_central_arch(server_model, client_list)
 
-        # our ending time
-        round_end_time = time.time()
+        # our ending time (changes depending on whether we are enforcing straggler delay)
+        if straggler_max_delay > 0:
+            # if we enforce straggler delay, then add the additional time to reflect that
+            round_end_time = time.time() + total_time_delay
+        else:
+            # otherwise use the time that was recorded as is
+            round_end_time = time.time()
 
         # test/evaluation
         total_accuracy, total_val_loss = eval_model(server_model, testloader)

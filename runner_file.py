@@ -1,10 +1,7 @@
 import argparse
 from argparse import RawTextHelpFormatter
-import torch.nn as nn
-import torch.optim as optim
-import random 
+import numpy as np
 import matplotlib.pyplot as plt
-import sys
 import os
 
 from models import ConvNet
@@ -14,7 +11,7 @@ from train_utils import fl_semidecentralized_cluster_train, fl_centralized_train
 
 
 def plot_acc(accuracies, test_type, labels, n_clients, title):
-    os.makedirs('plots', exist_ok=True)  # creates 'plots/' if it doesn't exist
+    os.makedirs(f'plots/{test_type}', exist_ok=True)  # creates 'plots/{test_type}' if it doesn't exist to separate depending on what test we are using
     # Plot the accuracies
     plt.figure(figsize=(10, 6))
 
@@ -28,10 +25,10 @@ def plot_acc(accuracies, test_type, labels, n_clients, title):
     plt.legend()
     plt.grid(True)
 
-    plt.savefig(f'plots/test_accuracy_{test_type}_{n_clients}clnts.png')
+    plt.savefig(f'plots/{test_type}/test_accuracy_{test_type}_{n_clients}clnts.png')
 
 def plot_loss(losses, test_type, labels, n_clients, title):
-    os.makedirs('plots', exist_ok=True)  # creates 'plots/' if it doesn't exist
+    os.makedirs(f'plots/{test_type}', exist_ok=True)  # creates 'plots/{test_type}' if it doesn't exist to separate depending on what test we are using
     # Plot the losses
     plt.figure(figsize=(10, 6))
     
@@ -45,16 +42,16 @@ def plot_loss(losses, test_type, labels, n_clients, title):
     plt.legend()
     plt.grid(True)
 
-    plt.savefig(f'plots/test_loss_{test_type}_{n_clients}clnts.png')
+    plt.savefig(f'plots/{test_type}/test_loss_{test_type}_{n_clients}clnts.png')
 
 
 def plot_comm_times(comm_times, test_type, labels, n_clients, title):
-    os.makedirs('plots', exist_ok=True)  # creates 'plots/' if it doesn't exist
+    os.makedirs(f'plots/{test_type}', exist_ok=True)  # creates 'plots/{test_type}' if it doesn't exist to separate depending on what test we are using
     # Plot the losses
     plt.figure(figsize=(10, 6))
     
     for framework_idx, framework_comm_times in enumerate(comm_times):
-        plt.plot(framework_comm_times, label = f"{labels[framework_idx]}")
+        plt.plot(framework_comm_times, label = f"{labels[framework_idx]} / mean time = {np.mean(framework_comm_times):0.2f}")
     
     # Add labels and title
     plt.xlabel('Communication Rounds')
@@ -63,16 +60,22 @@ def plot_comm_times(comm_times, test_type, labels, n_clients, title):
     plt.legend()
     plt.grid(True)
 
-    plt.savefig(f'plots/test_comm_times_{test_type}_{n_clients}clnts.png')
+    plt.savefig(f'plots/{test_type}/test_comm_times_{test_type}_{n_clients}clnts.png')
 
 
 def test_cluster_framework_variations(test_type, args):
-    n_clients = 50
     
-    # get all of the client data and the testloader
-    client_data, testloader = build_mnist(n_clients, args.iid_alpha, args.batch_size, seed=args.seed)
+    if test_type == "T1_eval_against_baselines":
+
+        # Test Description:
+        # In this test, we will be evaluating our framework's performance against the baselines (being decentralized server architectire and
+        # a central server gossip network architecture). We evaluate the accuracy, loss, and communication round time, and plot the 
+        # results.
+
+        n_clients = 50
     
-    if test_type == "equal_num_of_clients_per_cluster":
+        # get all of the client data and the testloader
+        client_data, testloader = build_mnist(n_clients, args.iid_alpha, args.batch_size, seed=args.seed)
 
         # ------------------------
         # creating the parameter server model for the fully decentralized arch
@@ -85,7 +88,7 @@ def test_cluster_framework_variations(test_type, args):
         # creating the parameter server model for the cluster arch
         cluster_arch_server_model = ConvNet()
         # our framework
-        accuracies_cluster_comm, losses_cluster_comm, times_cluster_comm = fl_semidecentralized_cluster_train(cluster_arch_server_model, client_data, args.comm_rounds, args.lr, args.momentum, args.local_iters, args.straggler_max_delay, testloader, "equal_num_of_clients_per_cluster", num_clusters=5)
+        accuracies_cluster_comm, losses_cluster_comm, times_cluster_comm = fl_semidecentralized_cluster_train(cluster_arch_server_model, client_data, args.comm_rounds, args.lr, args.momentum, args.local_iters, args.straggler_max_delay, testloader, "T1_eval_against_baselines", num_clusters=5)
         # ------------------------
 
         # ------------------------
@@ -105,10 +108,94 @@ def test_cluster_framework_variations(test_type, args):
         plot_loss(losses, test_type, plot_labels, n_clients, 'Loss w/ eq num of clients per cluster')
         plot_comm_times(times, test_type, plot_labels, n_clients, 'Communication Times w/ eq num of clients per cluster')
 
+    elif test_type == "T2_change_num_of_clusters":
+
+        # Test Description:
+        # In this test, we will be evaluating our framework's performance when you change the number of clusters used against the 
+        # central server gossip network architecture. There are 50 clients total, but for our architecture, we use the following 
+        # number of clusters: 5 clusters (10 clients per cluster), 10 clusters (5 clients per cluster), and 25 clusters (2 clients
+        # per cluster). We evaluate the accuracy, loss, and communication round time, and plot the results.
+
+        n_clients = 50
+    
+        # get all of the client data and the testloader
+        client_data, testloader = build_mnist(n_clients, args.iid_alpha, args.batch_size, seed=args.seed)
+
+        # ------------------------
+        # creating the parameter server model for the cluster arch with 5 clusters (10 clients per cluster)
+        cluster_arch_server_model_5 = ConvNet()
+        # our framework
+        accuracies_cluster_comm_5, losses_cluster_comm_5, times_cluster_comm_5 = fl_semidecentralized_cluster_train(cluster_arch_server_model_5, client_data, args.comm_rounds, args.lr, args.momentum, args.local_iters, args.straggler_max_delay, testloader, "T2_change_num_of_clusters", num_clusters=5)
+        # ------------------------
+
+        # ------------------------
+        # creating the parameter server model for the cluster arch with 10 clusters (5 clients per cluster)
+        cluster_arch_server_model_10 = ConvNet()
+        # our framework
+        accuracies_cluster_comm_10, losses_cluster_comm_10, times_cluster_comm_10 = fl_semidecentralized_cluster_train(cluster_arch_server_model_10, client_data, args.comm_rounds, args.lr, args.momentum, args.local_iters, args.straggler_max_delay, testloader, "T2_change_num_of_clusters", num_clusters=10)
+        # ------------------------
+
+        # ------------------------
+        # creating the parameter server model for the cluster arch with 25 clusters (2 clients per cluster)
+        cluster_arch_server_model_25 = ConvNet()
+        # our framework
+        accuracies_cluster_comm_25, losses_cluster_comm_25, times_cluster_comm_25 = fl_semidecentralized_cluster_train(cluster_arch_server_model_25, client_data, args.comm_rounds, args.lr, args.momentum, args.local_iters, args.straggler_max_delay, testloader, "T2_change_num_of_clusters", num_clusters=25)
+        # ------------------------
+
+        # ------------------------
+        # creating the parameter server model for the central arch
+        central_arch_server_model = ConvNet()
+        # centralized fully sync SGD
+        accuracies_central_comm, losses_central_comm, times_central_comm = fl_centralized_train(central_arch_server_model, client_data, args.comm_rounds, args.lr, args.momentum, args.local_iters, args.straggler_max_delay, testloader)
+        # ------------------------
+
+        plot_labels = ["Our Semi-decentralized Framework (clusters = 5)", "Our Semi-decentralized Framework (clusters = 10)",  "Our Semi-decentralized Framework (clusters = 25)", "Fully Sync SGD (centralized)"]
+        accuracies = [accuracies_cluster_comm_5, accuracies_cluster_comm_10, accuracies_cluster_comm_25, accuracies_central_comm]
+        losses = [losses_cluster_comm_5, losses_cluster_comm_10, losses_cluster_comm_25, losses_central_comm]
+        times = [times_cluster_comm_5, times_cluster_comm_10, times_cluster_comm_25, times_central_comm]
         
-    # elif test_type == "diff_num_of_clusters":
-    #     # TODO 
-    #     pass
+        # plot everything
+        plot_acc(accuracies, test_type, plot_labels, n_clients, 'Accuracy w/ adapting num of clusters')
+        plot_loss(losses, test_type, plot_labels, n_clients, 'Loss w/ adapting num of clusters')
+        plot_comm_times(times, test_type, plot_labels, n_clients, 'Communication Times w/ adapting num of clusters')
+
+    elif test_type == "T3_scale_up_num_of_clients":
+
+        # Test Description:
+        # In this test, we will be evaluating our framework's performance when we scale up the number of clients against the baseline
+        # central server gossip network architecture. We scale up the number of clients to 150. We evaluate the accuracy, loss, and 
+        # communication round time, and plot the results.
+
+        n_clients = 150
+    
+        # get all of the client data and the testloader
+        client_data, testloader = build_mnist(n_clients, args.iid_alpha, args.batch_size, seed=args.seed)
+
+        # ------------------------
+        # creating the parameter server model for the cluster arch
+        cluster_arch_server_model = ConvNet()
+        # our framework
+        accuracies_cluster_comm, losses_cluster_comm, times_cluster_comm = fl_semidecentralized_cluster_train(cluster_arch_server_model, client_data, args.comm_rounds, args.lr, args.momentum, args.local_iters, args.straggler_max_delay, testloader, "T3_scale_up_num_of_clients", num_clusters=10)
+        # ------------------------
+
+        # ------------------------
+        # creating the parameter server model for the central arch
+        central_arch_server_model = ConvNet()
+        # centralized fully sync SGD
+        accuracies_central_comm, losses_central_comm, times_central_comm = fl_centralized_train(central_arch_server_model, client_data, args.comm_rounds, args.lr, args.momentum, args.local_iters, args.straggler_max_delay, testloader)
+        # ------------------------
+
+        plot_labels = ["Our Semi-decentralized Framework (clusters = 10)", "Fully Sync SGD (centralized)"]
+        accuracies = [accuracies_cluster_comm, accuracies_central_comm]
+        losses = [losses_cluster_comm, losses_central_comm]
+        times = [times_cluster_comm, times_central_comm]
+        
+        # plot everything
+        plot_acc(accuracies, test_type, plot_labels, n_clients, 'Accuracy w/ scaled up num of clients (150)')
+        plot_loss(losses, test_type, plot_labels, n_clients, 'Loss w/ scaled up num of clients (150)')
+        plot_comm_times(times, test_type, plot_labels, n_clients, 'Communication Times w/ scaled up num of clients (150)')
+        
+
     # elif test_type == "diff_num_of_clients_per_cluster":
     #     # TODO 
 
@@ -135,78 +222,29 @@ def test_cluster_framework_variations(test_type, args):
 
 
 
-def test_cluster_comm_vs_gossip_comm(args):
-
-    n_clients_values = [5, 10, 25, 50]
-
-    for n_clients in n_clients_values:
-
-        # get all of the client data and the testloader
-        client_data, testloader = build_mnist(n_clients, args.iid_alpha, args.batch_size, seed=args.seed)
-        
-        # creating our parameter server model
-        server_model = ConvNet()
-
-        # train our framework
-        # get the accuracies and timing
-        accuracies_cluster_comm, times_cluster_comm = fl_semidecentralized_cluster_train(server_model, client_data, args.comm_rounds, args.lr, args.momentum, args.local_iters, args.straggler_max_delay, testloader, "equal_num_of_clients_per_cluster", num_clusters=5)
-
-        # train centralized fedavg framework
-        # get the accuracies and timing
-        # accuracies_gossip_comm, times_gossip_comm = fl_gossip_train()
-
-
-        # accuracies = fl_train(server_model, client_data, args.comm_rounds, args.lr, args.momentum, args.local_iters, testloader)
-        # all_accuracies.append(accuracies)
-
-
-
-
 def main(args): 
     print("Beginning Tests")
-    # TODO: Will most likely have to move this.... or adapt it to capture the information from each test to properly plot it
-    all_accuracies = [] # captures all of the accuracies
-    all_times = [] # caputure the time it took to complete each iteration (this can be the avg time it took to complete the local iters, send data back to server, compute the aggregation, then send the new model back)
 
     # TESTING OUR FRAMWORK WITH VARIATIONS OF THE ARCHITECTURE
-    # test equal amount of number of clients per cluster
-    print("TEST 1: Testing when there are an equal amount of clients in a cluster vs the baseline fully sunc SGD")
-    test_cluster_framework_variations("equal_num_of_clients_per_cluster", args)
-    print("Done with TEST 1")
-    
-    # # test the number of clients in a given cluster (iid spread of clients in a cluster vs non iid)
-    # test_cluster_framework_variations("diff_num_of_clients_per_cluster", args)
-    
-    # # test different number of clusters
-    # test_cluster_framework_variations("diff_num_of_clusters", args)
 
-    # # TESTING OUR FRAMWORK VS GOSSIP COMM
-    # test_cluster_comm_vs_gossip_comm(args)
+    # test our framework against the other baselines
+    # print("TEST 1: Testing when there are an equal amount of clients in a cluster vs the baseline fully sync SGD and decentralized FL")
+    # test_cluster_framework_variations("T1_eval_against_baselines", args)
+    # print("Done with TEST 1")
+    # print("---------------------------------")
 
+    # test our framework with adapted num of clusters against one of the baselines
+    print("TEST 2: Testing when the number of clusters are adapted (changing the num of clusters) vs the baseline fully sync SGD")
+    test_cluster_framework_variations("T2_change_num_of_clusters", args)
+    print("Done with TEST 2")
+    print("---------------------------------")
 
-    
+    # # test our framework with scaled up num of clients against one of the baselines
+    # print("TEST 3: Testing when we scale up the number of clients vs the baseline fully sync SGD")
+    # test_cluster_framework_variations("T3_scale_up_num_of_clients", args)
+    # print("Done with TEST 3")
+    # print("---------------------------------")
 
-
-
-
-    # Get proper plots of the training
-
-    # # Plot the accuracies
-    # plt.figure(figsize=(10, 6))
-    
-    # # Loop over each accuracy list and corresponding n_clients value
-    # for i, accuracies in enumerate(all_accuracies):
-    #     plt.plot(accuracies, label=f'{n_clients_values[i]} clients')
-    
-    # # Add labels and title
-    # plt.xlabel('Communication Rounds')
-    # plt.ylabel('Accuracy')
-    # plt.title('FedAvg w/ Different Numbers of Clients')
-    # plt.legend()
-    # plt.grid(True)
-    
-    # # Save the plot
-    # plt.savefig('plots/question_1c.png')
 
 
 
@@ -218,8 +256,6 @@ if __name__ == "__main__":
         help='Torch random seed')
     
     # Dataset params
-    parser.add_argument('--num-clients', type=int, default=10,
-        help='Number of client devices to use in FL training')
     parser.add_argument('--iid-alpha', type=float, default=-1,
         help='Level of heterogeneity to introduce across client devices')
     parser.add_argument('--batch-size', type=int, default=32, 
@@ -238,7 +274,7 @@ if __name__ == "__main__":
         help='Momentum')
     parser.add_argument('--local-iters', type=int, default=10,
         help='Number of local iterations to use for training')
-    parser.add_argument('--straggler-max-delay', type=int, default=5,
+    parser.add_argument('--straggler-max-delay', type=int, default=0,
         help='The maximum time that a straggler can delay for')
     
     args = parser.parse_args()
