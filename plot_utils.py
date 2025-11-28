@@ -1,5 +1,6 @@
 import matplotlib.pyplot as plt
 import os
+import numpy as np
 
 def plot_acc(accuracies, test_type, labels, n_clients, title):
     os.makedirs(f'plots/{test_type}', exist_ok=True)  # creates 'plots/{test_type}' if it doesn't exist to separate depending on what test we are using
@@ -27,7 +28,7 @@ def plot_loss(losses, test_type, labels, n_clients, title):
         plt.plot(framework_loss, label = f"{labels[framework_idx]}")
     
     # Add labels and title
-    plt.xlabel('Communication Round Time (in sec)')
+    plt.xlabel('Communication Rounds')
     plt.ylabel('Loss')
     plt.title(f"{title} ({n_clients} clients total)")
     plt.legend()
