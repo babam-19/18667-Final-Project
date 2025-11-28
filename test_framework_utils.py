@@ -209,51 +209,114 @@ def test_cluster_framework_variations(test_type, args):
 
     elif test_type.startswith("T6_diff_num_of_clients_per_cluster"):
         # Test Description:
-        # Fixed number of total clients, but uneven cluster sizes
+        # Fixed number of total clients, but uneven cluster sizes vs equal-split baseline (same #clusters)
         n_clients = getattr(args, "n_clients", 50)
         num_clusters = getattr(args, "num_clusters", 5)
         cluster_sizes = getattr(args, "cluster_sizes", None)
+        if cluster_sizes is None:
+            raise ValueError("T6 requires args.cluster_sizes (list of cluster sizes that sums to n_clients).")
 
         client_data, testloader = build_mnist(n_clients, args.iid_alpha, args.batch_size, seed=args.seed)
 
-        server_model = ConvNet()
-        acc, loss, t = fl_semidecentralized_cluster_train(
-            server_model, client_data, args.comm_rounds, args.lr, args.momentum, args.local_iters,
-            args.straggler_max_delay, testloader, main_test_type="diff_num_of_clients_per_cluster", 
-            num_clusters=num_clusters, cluster_sizes=cluster_sizes, 
-            intra_graph_type=getattr(args, "intra_graph_type", "dense"), intra_graph_k=getattr(args, "intra_graph_k", 2), 
-            intra_graph_p=getattr(args, "intra_graph_p", 0.2), intra_graph_seed=args.seed, 
-            gossip_rounds=getattr(args, "gossip_rounds", 1), global_sync_E=getattr(args, "global_sync_E", 1),
+        intra_graph_type = getattr(args, "intra_graph_type", "dense")
+        intra_graph_k = getattr(args, "intra_graph_k", 2)
+        intra_graph_p = getattr(args, "intra_graph_p", 0.2)
+        gossip_rounds = getattr(args, "gossip_rounds", 1)
+        global_sync_E = getattr(args, "global_sync_E", 1)
+
+        # Uneven cluster sizes
+        server_model_uneven = ConvNet()
+        acc_uneven, loss_uneven, t_uneven = fl_semidecentralized_cluster_train(
+            server_model_uneven, client_data, args.comm_rounds, args.lr, args.momentum, args.local_iters,
+            args.straggler_max_delay, testloader,
+            main_test_type="diff_num_of_clients_per_cluster",
+            num_clusters=num_clusters,
+            cluster_sizes=cluster_sizes,
+            intra_graph_type=intra_graph_type, intra_graph_k=intra_graph_k, intra_graph_p=intra_graph_p,
+            intra_graph_seed=args.seed,
+            gossip_rounds=gossip_rounds,
+            global_sync_E=global_sync_E,
+            clients_frac=getattr(args, "clients_frac", 1.0),
         )
 
-        plot_acc([acc], test_type, ["Uneven clusters"], n_clients, "Accuracy (uneven cluster sizes)")
-        plot_loss([loss], test_type, ["Uneven clusters"], n_clients, "Loss (uneven cluster sizes)")
-        plot_comm_times([t], test_type, ["Uneven clusters"], n_clients, "Comm time (uneven cluster sizes)")
+        # (baseline): Equal split with same num_clusters
+        server_model_equal = ConvNet()
+        acc_equal, loss_equal, t_equal = fl_semidecentralized_cluster_train(
+            server_model_equal, client_data, args.comm_rounds, args.lr, args.momentum, args.local_iters,
+            args.straggler_max_delay, testloader,
+            main_test_type="T1_eval_against_baselines",   # any eq-split tag that routes to equal split
+            num_clusters=num_clusters,
+            cluster_sizes=None,
+            intra_graph_type=intra_graph_type, intra_graph_k=intra_graph_k, intra_graph_p=intra_graph_p,
+            intra_graph_seed=args.seed,
+            gossip_rounds=gossip_rounds,
+            global_sync_E=global_sync_E,
+            clients_frac=getattr(args, "clients_frac", 1.0),
+        )
+
+        plot_labels = [f"Uneven clusters {cluster_sizes}", f"Baseline: equal split ({num_clusters} clusters)"]
+        plot_acc([acc_uneven, acc_equal], test_type, plot_labels, n_clients, "Accuracy (uneven vs equal cluster sizes)")
+        plot_loss([loss_uneven, loss_equal], test_type, plot_labels, n_clients, "Loss (uneven vs equal cluster sizes)")
+        plot_comm_times([t_uneven, t_equal], test_type, plot_labels, n_clients, "Comm time (uneven vs equal cluster sizes)")
 
     elif test_type.startswith("T7_diff_num_of_clusters_over_rounds"):
         # Test Description:
-        # Change number of clusters over rounds using a schedule
+        # Change number of clusters over rounds using a schedule vs fixed-#clusters baseline.
         n_clients = getattr(args, "n_clients", 50)
         cluster_schedule = getattr(args, "cluster_schedule", None)
         if cluster_schedule is None:
             raise ValueError("T7 requires args.cluster_schedule (list of cluster counts per round).")
+        if len(cluster_schedule) < args.comm_rounds:
+            raise ValueError(f"T7: cluster_schedule length {len(cluster_schedule)} < comm_rounds {args.comm_rounds}")
+
+        # choose baseline cluster count (fixed across rounds)
+        baseline_num_clusters = getattr(args, "baseline_num_clusters", int(cluster_schedule[0]))
 
         client_data, testloader = build_mnist(n_clients, args.iid_alpha, args.batch_size, seed=args.seed)
 
-        server_model = ConvNet()
-        acc, loss, t = fl_semidecentralized_cluster_train(
-            server_model, client_data, args.comm_rounds, args.lr, args.momentum, args.local_iters,
-            args.straggler_max_delay, testloader, main_test_type="diff_num_of_clusters",
-            num_clusters=cluster_schedule[0], cluster_schedule=cluster_schedule,
-            reshuffle_clusters_each_round=getattr(args, "reshuffle_clusters_each_round", False),
-            intra_graph_type=getattr(args, "intra_graph_type", "dense"), intra_graph_k=getattr(args, "intra_graph_k", 2),
-            intra_graph_p=getattr(args, "intra_graph_p", 0.2), intra_graph_seed=args.seed,
-            gossip_rounds=getattr(args, "gossip_rounds", 1), global_sync_E=getattr(args, "global_sync_E", 1),
+        intra_graph_type = getattr(args, "intra_graph_type", "dense")
+        intra_graph_k = getattr(args, "intra_graph_k", 2)
+        intra_graph_p = getattr(args, "intra_graph_p", 0.2)
+        gossip_rounds = getattr(args, "gossip_rounds", 1)
+        global_sync_E = getattr(args, "global_sync_E", 1)
+        reshuffle = getattr(args, "reshuffle_clusters_each_round", False)
+
+        # Dynamic clusters using schedule
+        server_model_dynamic = ConvNet()
+        acc_dyn, loss_dyn, t_dyn = fl_semidecentralized_cluster_train(
+            server_model_dynamic, client_data, args.comm_rounds, args.lr, args.momentum, args.local_iters,
+            args.straggler_max_delay, testloader,
+            main_test_type="diff_num_of_clusters",
+            num_clusters=int(cluster_schedule[0]),
+            cluster_schedule=cluster_schedule,
+            reshuffle_clusters_each_round=reshuffle,
+            intra_graph_type=intra_graph_type, intra_graph_k=intra_graph_k, intra_graph_p=intra_graph_p,
+            intra_graph_seed=args.seed,
+            gossip_rounds=gossip_rounds,
+            global_sync_E=global_sync_E,
+            clients_frac=getattr(args, "clients_frac", 1.0),
         )
 
-        plot_acc([acc], test_type, ["Dynamic clusters"], n_clients, "Accuracy (dynamic #clusters over rounds)")
-        plot_loss([loss], test_type, ["Dynamic clusters"], n_clients, "Loss (dynamic #clusters over rounds)")
-        plot_comm_times([t], test_type, ["Dynamic clusters"], n_clients, "Comm time (dynamic #clusters over rounds)")
+        # (baseline): Fixed clusters across all rounds
+        server_model_fixed = ConvNet()
+        acc_fix, loss_fix, t_fix = fl_semidecentralized_cluster_train(
+            server_model_fixed, client_data, args.comm_rounds, args.lr, args.momentum, args.local_iters,
+            args.straggler_max_delay, testloader,
+            main_test_type="T1_eval_against_baselines",  # routes to equal split behavior
+            num_clusters=baseline_num_clusters,
+            cluster_schedule=None,
+            reshuffle_clusters_each_round=reshuffle,
+            intra_graph_type=intra_graph_type, intra_graph_k=intra_graph_k, intra_graph_p=intra_graph_p,
+            intra_graph_seed=args.seed,
+            gossip_rounds=gossip_rounds,
+            global_sync_E=global_sync_E,
+            clients_frac=getattr(args, "clients_frac", 1.0),
+        )
+
+        plot_labels = [f"Dynamic clusters (schedule)", f"Baseline: fixed clusters = {baseline_num_clusters}"]
+        plot_acc([acc_dyn, acc_fix], test_type, plot_labels, n_clients, "Accuracy (dynamic vs fixed #clusters)")
+        plot_loss([loss_dyn, loss_fix], test_type, plot_labels, n_clients, "Loss (dynamic vs fixed #clusters)")
+        plot_comm_times([t_dyn, t_fix], test_type, plot_labels, n_clients, "Comm time (dynamic vs fixed #clusters)")
 
     elif test_type.startswith("T8_partial_participation"):
         # Test Description:
