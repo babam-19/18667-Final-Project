@@ -8,23 +8,28 @@ def main(args):
 
     # TESTING OUR FRAMEWORK WITH VARIATIONS OF THE ARCHITECTURE
 
-    # test our framework against the other baselines
-    print("TEST 1: Testing when there are an equal amount of clients in a cluster vs the baseline fully sync SGD and decentralized FL")
-    test_cluster_framework_variations("T1_eval_against_baselines", args)
-    print("Done with TEST 1")
-    print("---------------------------------")
+    tests_to_run = args.test_type
 
-    # test our framework with adapted num of clusters against one of the baselines
-    print("TEST 2: Testing when the number of clusters are adapted (changing the num of clusters) vs the baseline fully sync SGD")
-    test_cluster_framework_variations("T2_change_num_of_clusters", args)
-    print("Done with TEST 2")
-    print("---------------------------------")
+    if "T1_eval_against_baselines" in tests_to_run or "all" in tests_to_run:
+        # test our framework against the other baselines
+        print("TEST 1: Testing when there are an equal amount of clients in a cluster vs the baseline fully sync SGD and decentralized FL")
+        test_cluster_framework_variations("T1_eval_against_baselines", args)
+        print("Done with TEST 1")
+        print("---------------------------------")
 
-    # test our framework with scaled up num of clients against one of the baselines
-    print("TEST 3: Testing when we scale up the number of clients vs the baseline fully sync SGD")
-    test_cluster_framework_variations("T3_scale_up_num_of_clients", args)
-    print("Done with TEST 3")
-    print("---------------------------------")
+    if "T2_change_num_of_clusters" in tests_to_run or "all" in tests_to_run:
+        # test our framework with adapted num of clusters against one of the baselines
+        print("TEST 2: Testing when the number of clusters are adapted (changing the num of clusters) vs the baseline fully sync SGD")
+        test_cluster_framework_variations("T2_change_num_of_clusters", args)
+        print("Done with TEST 2")
+        print("---------------------------------")
+
+    if "T3_scale_up_num_of_clients" in tests_to_run or "all" in tests_to_run:
+        # test our framework with scaled up num of clients against one of the baselines
+        print("TEST 3: Testing when we scale up the number of clients vs the baseline fully sync SGD")
+        test_cluster_framework_variations("T3_scale_up_num_of_clients", args)
+        print("Done with TEST 3")
+        print("---------------------------------")
 
 
 
@@ -57,6 +62,10 @@ if __name__ == "__main__":
         help='Number of local iterations to use for training')
     parser.add_argument('--straggler-max-delay', type=int, default=0,
         help='The maximum time that a straggler can delay for')
+    
+    # Isolating tests param
+    parser.add_argument('--test_type', nargs='*', type=str, default='all',
+        help='What test you want to run')
     
     args = parser.parse_args()
 

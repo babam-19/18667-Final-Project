@@ -1,5 +1,6 @@
 import matplotlib.pyplot as plt
 import os
+import numpy as np
 
 def plot_acc(accuracies, test_type, labels, n_clients, title):
     os.makedirs(f'plots/{test_type}', exist_ok=True)  # creates 'plots/{test_type}' if it doesn't exist to separate depending on what test we are using
@@ -7,7 +8,7 @@ def plot_acc(accuracies, test_type, labels, n_clients, title):
     plt.figure(figsize=(10, 6))
 
     for framework_idx, framework_acc in enumerate(accuracies):
-        plt.plot(framework_acc, label = f"{labels[framework_idx]}")
+        plt.plot(framework_acc, label = f"{labels[framework_idx]} / final acc ~ {framework_acc[-1] * 100:0.2f}%")
     
     # Add labels and title
     plt.xlabel('Communication Rounds')
@@ -24,7 +25,7 @@ def plot_loss(losses, test_type, labels, n_clients, title):
     plt.figure(figsize=(10, 6))
     
     for framework_idx, framework_loss in enumerate(losses):
-        plt.plot(framework_loss, label = f"{labels[framework_idx]}")
+        plt.plot(framework_loss, label = f"{labels[framework_idx]} / final loss ~ {framework_loss[-1]:0.3f}")
     
     # Add labels and title
     plt.xlabel('Communication Round Time (in sec)')

@@ -1,7 +1,6 @@
 import torch 
 import numpy as np
 import copy 
-# BA:
 import torch.optim as optim
 from scipy.stats import truncexpon
 import time
@@ -13,9 +12,10 @@ def sample_straggler_delay(max_delay, num_clients, mean_delay=0.5):
     return truncexpon(b=b, scale=mean_delay).rvs(num_clients)
 
 def train_cluster(cluster_idx, clients_per_cluster, clients_in_clusters_ls, client_opts_in_clusters_ls, client_data_in_clusters_ls, local_iters):
+    
     """
-    Trains all clients within a specified cluster for a fixed number of local iterations 
-    and returns the average training loss across those clients.
+    Trains all clients within a specified cluster for a fixed number of local iterations and returns the average 
+    training loss across those clients.
 
     Args:
         cluster_idx (int): Index of the cluster to train.
@@ -101,6 +101,7 @@ def train_clients(client_ls, client_opt_ls, client_data_ls, local_iters):
     return np.mean(total_training_loss)
 
 def eval_model(model_to_eval, test_dataloader):
+    
     """
     Evaluates a given model using test data (taking the validation accuracy and the loss of the model)
     
@@ -111,7 +112,8 @@ def eval_model(model_to_eval, test_dataloader):
     Returns:
         (int, int): validation accuracy, validation loss
     """
-     # test/evaluation
+
+    # test/evaluation
     validation_acc = []
     validation_loss = []
     for i, (test_batch_input, test_batch_target) in enumerate(test_dataloader):
@@ -133,6 +135,7 @@ def get_mixing_matrix(graph_type, num_clients):
     if graph_type == 'dense':
         # mixing matrix for dense communication graph (which is the only one we are considering in this case)
         mixing_matrix = torch.ones((num_clients, num_clients)) / num_clients
+    # TODO: Implement a type of mesh or ring network topology for the mixing matrix
     return mixing_matrix
 
 
@@ -178,6 +181,7 @@ def agg_models_at_ps_for_cluster_arch(server_model, randomly_chosen_clients, cli
     Returns:
         None
     """
+
     # grabbing the clients from each cluster that will be used for aggregation
     clients_to_be_agg = []
     for cluster_idx, client_idx in enumerate(randomly_chosen_clients):
