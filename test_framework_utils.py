@@ -98,10 +98,10 @@ def test_cluster_framework_variations(test_type, args):
         # ------------------------
 
         plot_labels = [f"Our Semi-decentralized Framework (clusters = {c})" for c in cluster_counts]
-        plot_labels.append("Fully Sync SGD (centralized)", "Local Iter SGD (centralized)")
-        accuracies.append(accuracies_fsync_SGD_comm, accuracies_local_iter_comm)
-        losses.append(losses_fsync_SGD_comm, losses_local_iter_comm)
-        times.append(times_fsync_SGD_comm, times_local_iter_comm)
+        plot_labels.extend(["Fully Sync SGD (centralized)", "Local Iter SGD (centralized)"])
+        accuracies.extend([accuracies_fsync_SGD_comm, accuracies_local_iter_comm])
+        losses.extend([losses_fsync_SGD_comm, losses_local_iter_comm])
+        times.extend([times_fsync_SGD_comm, times_local_iter_comm])
         
         # plot everything
         plot_acc(accuracies, test_type, plot_labels, n_clients, 'Accuracy w/ adapting num of clusters')
