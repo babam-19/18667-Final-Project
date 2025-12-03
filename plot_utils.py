@@ -28,7 +28,7 @@ def plot_loss(losses, test_type, labels, n_clients, title):
         plt.plot(framework_loss, label = f"{labels[framework_idx]} / final loss ~ {framework_loss[-1]:0.3f}")
     
     # Add labels and title
-    plt.xlabel('Communication Round Time (in sec)')
+    plt.xlabel('Communication Rounds')
     plt.ylabel('Loss')
     plt.title(f"{title} ({n_clients} clients total)")
     plt.legend()
