@@ -19,17 +19,17 @@ def train_cluster(cluster_idx, clients_per_cluster, clients_in_clusters_ls, clie
 
     Args:
         cluster_idx (int): Index of the cluster to train.
-        clients_per_cluster (list[int]): List containing the number of clients in each cluster.
+        clients_per_cluster (list[int]): List containing the number of clients in each cluster
         clients_in_clusters_ls (list[list[torch.nn.Module]]): Nested list of client models 
-            grouped by cluster.
+            grouped by cluster
         client_opts_in_clusters_ls (list[list[torch.optim.Optimizer]]): Nested list of optimizers 
-            corresponding to each client model in each cluster.
+            corresponding to each client model in each cluster
         client_data_in_clusters_ls (list[list[DataLoader]]): Nested list of dataloaders containing 
-            training data for each client in each cluster.
-        local_iters (int): Maximum number of local training iterations per client.
+            training data for each client in each cluster
+        local_iters (int): Maximum number of local training iterations per client
 
     Returns:
-        float: The mean training loss across all clients in the specified cluster.
+        float: The mean training loss across all clients in the specified cluster
     """
 
     num_clients_in_current_cluster = clients_per_cluster[cluster_idx]
@@ -72,6 +72,20 @@ def train_cluster(cluster_idx, clients_per_cluster, clients_in_clusters_ls, clie
     return np.mean(total_training_loss)
 
 def train_clients(client_ls, client_opt_ls, client_data_ls, local_iters, selected_client_indices=None):
+    """
+    Trains a set of client models on their respective local datasets for a fixed number of iterations.
+    
+    Args:
+        client_ls (list[torch.nn.Module]): List of client models to be trained
+        client_opt_ls (list[torch.optim.Optimizer]): List of optimizers corresponding to each client model
+        client_data_ls (list[DataLoader]): List of dataloaders providing local training data for each client
+        local_iters (int): Maximum number of local iterations each client trains on
+        selected_client_indices (list[int], optional): Indices of clients to train
+            If None, all clients in client_ls are trained
+    
+    Returns:
+        float: The average training loss across all selected clients
+    """
     if selected_client_indices is None:
         selected_client_indices = list(range(len(client_ls)))
 
@@ -106,7 +120,6 @@ def train_clients(client_ls, client_opt_ls, client_data_ls, local_iters, selecte
     return np.mean(total_training_loss)
 
 def eval_model(model_to_eval, test_dataloader):
-    
     """
     Evaluates a given model using test data (taking the validation accuracy and the loss of the model)
     
@@ -137,8 +150,25 @@ def eval_model(model_to_eval, test_dataloader):
 
 def build_undirected_neighbors(graph_type, n, k=2, p=0.2, seed=0):
     """
-    Returns neighbors list for an undirected graph on n nodes.
-    graph_type: 'ring', 'star', 'random'
+    Constructs a neighbors list for an undirected graph on n nodes/clients.
+    
+    Supported graph types:
+        - "ring": Each node is connected to k neighbors in a ring topology
+        - "star": A central hub node is connected to all other nodes/clients
+        - "random": Edges are added between node pairs with probability `p` (ensures no isolated nodes/clients
+           by adding at least one edge if needed)
+
+    Args:
+        graph_type (str): The type of graph to construct. Must be "ring", "star", or "random"
+        n (int): Number of nodes/clients in the graph
+        k (int, optional): Degree parameter for ring topology. Each node/client connects to k neighbors
+            (split evenly on both sides). Defaults to 2. Ignored for "star" and "random" graph types.
+        p (float, optional): Probability of edge creation for random topology. Defaults to 0.2
+        seed (int, optional): Random seed for reproducibility in random topology. Defaults to 0
+
+    Returns:
+        list[list[int]]: A list of length n, where each entry contains the sorted list of 
+        neighboring node indices for that node.
     """
     rng = np.random.default_rng(seed)
     neighbors = [set() for _ in range(n)]
@@ -167,6 +197,7 @@ def build_undirected_neighbors(graph_type, n, k=2, p=0.2, seed=0):
             for j in range(i + 1, n):
                 if rng.random() < p:
                     add_edge(i, j)
+        
         # ensure no isolated nodes 
         for i in range(n):
             if len(neighbors[i]) == 0 and n > 1:
@@ -180,6 +211,23 @@ def build_undirected_neighbors(graph_type, n, k=2, p=0.2, seed=0):
     return [sorted(list(s)) for s in neighbors]
 
 def get_mixing_matrix(graph_type, num_clients, k=2, p=0.2, seed=0):
+    """
+    Constructs a mixing matrix for a given graph topology
+
+    Args:
+        graph_type (str): The type of graph to construct a mixing matrix for. Must be "dense", "ring", "star", or "random"
+        num_clients (int): Number of clients 
+        k (int, optional): Degree parameter for certain graph types built using build_undirected_neighbors() (e.g., ring)
+            Defaults to 2. Ignored for "dense" graph type
+        p (float, optional): Probability of edge creation for random graphs built using build_undirected_neighbors()
+            Defaults to 0.2. Ignored for "dense" graph type
+        seed (int, optional): Random seed for reproducibility in graph construction using build_undirected_neighbors()
+            Defaults to 0. Ignored for "dense" graph type
+
+    Returns:
+        torch.Tensor: A (num_clients x num_clients) row-stochastic mixing matrix W
+    """
+     
     if graph_type == "dense":
         return torch.ones((num_clients, num_clients)) / num_clients
 
@@ -202,6 +250,24 @@ def get_mixing_matrix(graph_type, num_clients, k=2, p=0.2, seed=0):
     return W
 
 def exchange_client_to_client_info(clients, n_clients, graph_type="dense", k=2, p=0.2, seed=0):
+    """
+    Exchanges and mixes model parameters among clients according to a specified 
+    communication graph, updating each client's parameters with a weighted 
+    combination of its neighbors' parameters.
+
+    Args:
+        clients (list[torch.nn.Module]): List of client models whose parameters will be mixed
+        n_clients (int): Total number of clients participating in the mixing/information exchange
+        graph_type (str, optional): The type of communication graph used to build the mixing matrix
+            Options are {"dense", "ring", "star", "random"}. Defaults to "dense"
+        k (int, optional): Degree parameter for certain graph types (e.g., ring). Defaults to 2
+        p (float, optional): Probability of edge creation for random graphs. Defaults to 0.2
+        seed (int, optional): Random seed for reproducibility in graph construction. Defaults to 0
+    
+    Returns:
+        None
+
+    """
     mixing_matrix = get_mixing_matrix(graph_type, n_clients, k=k, p=p, seed=seed)
 
     with torch.no_grad():
@@ -231,9 +297,9 @@ def agg_models_at_ps_for_cluster_arch(server_model, randomly_chosen_clients, cli
     clients (one per cluster).
 
     Args:
-        server_model (torch.nn.Module): The server model to update.
-        randomly_chosen_clients (List[int]): For each cluster, the index of the chosen client within that cluster.
-        clients_in_clusters_ls (List[List[torch.nn.Module]]): Client models grouped by cluster.
+        server_model (torch.nn.Module): The server model to update
+        randomly_chosen_clients (List[int]): For each cluster, the index of the chosen client within that cluster
+        clients_in_clusters_ls (List[List[torch.nn.Module]]): Client models grouped by cluster
 
     Returns:
         None
@@ -269,7 +335,7 @@ def agg_models_at_ps_for_central_arch(server_model, clients, selected_client_ind
     After the aggregation, the new model is sent back to all of the clients
     
     Args:
-        server_model (torch.nn.Module): The server model that will be updated with the averaged parameters from the client models.
+        server_model (torch.nn.Module): The server model that will be updated with the averaged parameters from the client models
         clients (List[torch.nn.Module]): List containing all of the clients 
     
     Returns:
@@ -301,6 +367,38 @@ def agg_models_at_ps_for_central_arch(server_model, clients, selected_client_ind
 
 def setup_client_cluster_arch(main_test_type, num_clusters, ls_of_clients, ls_of_client_opts, ls_of_client_data,
                               cluster_sizes=None, shuffle_clients=False, seed=0):
+    
+    """
+    This function organizes clients, their optimizers, and data into clusters based on the specified test type
+    and clustering configuration.
+
+    Depending on the experiment type (main_test_type), clients are either split evenly across
+    clusters or assigned according to custom cluster sizes. Optionally, clients can be shuffled
+    before assignment to clusters for randomized grouping.
+
+    Args:
+        main_test_type (str): Identifier for the experiment/test type. Determines clustering strategy used
+            - Equal split for each cluster required for: {"T1_eval_against_baselines", "T2_change_num_of_clusters",
+              "T3_scale_up_num_of_clients", "T4_graph_connectivity", "T5_global_sync_frequency",
+              "diff_num_of_clusters", "T8_partial_participation"}
+            - "diff_num_of_clients_per_cluster": Requires explicit cluster_sizes
+        num_clusters (int): Number of clusters to form (used for equal split cases)
+        ls_of_clients (list[torch.nn.Module]): List with all client models
+        ls_of_client_opts (list[torch.optim.Optimizer]): List with all optimizers corresponding to each client
+        ls_of_client_data (list[DataLoader]): List with all dataloaders providing local training data for each client
+        cluster_sizes (list[int], optional): Sizes of each cluster (only required for
+            "diff_num_of_clients_per_cluster"). NOTE: Must sum to the total number of clients
+        shuffle_clients (bool, optional): Whether to shuffle clients before assigning them to clusters
+            Defaults to False.
+        seed (int, optional): Random seed for reproducibility when shuffling. Defaults to 0
+
+    Returns:
+        tuple:
+            - clients_in_clusters_ls (list[np.ndarray]): Clients grouped into clusters
+            - client_opts_in_clusters_ls (list[np.ndarray]): Optimizers grouped into clusters
+            - clients_per_cluster (list[int]): Number of clients in each cluster
+            - client_data_in_clusters_ls (list[np.ndarray]): Client dataloaders grouped into clusters
+    """
     base_test_type = main_test_type.split("__")[0]
     
     clients_in_clusters_ls = None
@@ -359,6 +457,118 @@ def setup_client_cluster_arch(main_test_type, num_clusters, ls_of_clients, ls_of
 
     return clients_in_clusters_ls, client_opts_in_clusters_ls, clients_per_cluster,  client_data_in_clusters_ls
 
+
+def get_participating_client_idxs(clients_frac, num_clients, participation_rng):
+    """
+    This function selects the indices of clients that will participate in the current round based on the specified fraction. 
+    If the fraction is >= 1.0, all clients will participate. Otherwise, a random subset of clients is chosen without replacement.
+
+    Args:
+        clients_frac (float): Fraction of clients to participate in the round
+        num_clients (int): Total number of available clients
+        participation_rng (np.random.Generator): Random number generator used to
+            sample participating client indices
+
+    Returns:
+        List[int]: Indices of clients selected to participate in the round
+    """
+    
+    if clients_frac >= 1.0:
+        participating_idxs = list(range(num_clients))
+    else:
+        n_part = int(np.floor(clients_frac * num_clients))
+        n_part = max(1, n_part)
+        participating_idxs = participation_rng.choice(
+            num_clients, size=n_part, replace=False
+        ).tolist()
+
+    return participating_idxs
+
+def cluster_gossip(cluster_idx, clients_in_current_cluster, participating_idxs, gossip_rounds, current_round, graph_type, k, p, seed):
+    """
+    Performs intra-cluster gossip among participating clients. Only the selected participating clients exchange model 
+    information according to the defined graph topology over a specified number of gossip rounds.
+
+    Args:
+        cluster_idx (int): Identifier for the current cluster
+        clients_in_current_cluster (List[torch.nn.Module]): Models for all clients within the current cluster
+        participating_idxs (List[int]): Indices of clients participating in gossip for this cluster in the current round
+        gossip_rounds (int): Number of gossip exchanges to perform
+        current_round (int): Current communication/training round number
+        graph_type (str): Type of underlying gossip graph (e.g., "ring", "")
+        k (int):  Degree parameter for certain graph types (e.g., ring)
+        p (float): Probability of edge creation for random graphs
+        seed (int): Seed used to ensure reproducible gossip partner selection.
+
+    Returns:
+        None
+    """
+    
+    # gossip only among participating clients (non-participants stay untouched this round)
+    participating_models = [clients_in_current_cluster[i] for i in participating_idxs]
+    for _ in range(gossip_rounds):
+        exchange_client_to_client_info(
+            participating_models, len(participating_models),
+            graph_type=graph_type, k=k, p=p,
+            seed=seed + current_round + cluster_idx
+        )
+
+def manage_global_sync(global_sync_E, current_round, representative_clients, clients_in_clusters_ls, server_model):
+    """
+    Manages global synchronization across clusters by aggregating representative client models and optionally updating 
+    the server model. Synchronization occurs every global_sync_E rounds and when a sync is not performed, the function 
+    computes a "virtual" global model for evaluation without altering training states.
+
+    Args:
+        global_sync_E (int): Frequency (in rounds) at which global synchronization should occur. If ≤ 1, synchronization 
+            happens every round
+        current_round (int): The current communication/training round
+        representative_clients (List[int]): For each cluster, the index of the representative client whose model is sent 
+            to the server
+        clients_in_clusters_ls (List[List[torch.nn.Module]]): Nested list of client models grouped by cluster
+        server_model (torch.nn.Module): The central server model to update during global synchronization
+
+    Returns:
+        tuple:
+            - do_global_sync (bool): Whether a real global synchronization occurred this round
+            - backup_server_state (dict or None): A backup of the server model's previous state_dict if
+              no sync occurred; otherwise None
+    """
+
+    # aggregate at the PS only every global_sync_E rounds
+    do_global_sync = (global_sync_E <= 1) or ((current_round + 1) % global_sync_E == 0)
+
+    # build the representative models (one per cluster)
+    reps = []
+    for cluster_idx, client_idx in enumerate(representative_clients):
+        reps.append(clients_in_clusters_ls[cluster_idx][client_idx])
+
+    # compute the averaged "global" params from representatives (Welford-style mean)
+    avg_params = [torch.zeros_like(p) for p in reps[0].parameters()]
+    num_avged = 0
+    for m in reps:
+        num_avged += 1
+        for layer_idx, p in enumerate(m.parameters()):
+            avg_params[layer_idx] += (p - avg_params[layer_idx]) / num_avged
+
+    backup_server_state = None # will preserve the state if we are not doing a global sync that round... otherwise return none
+    if do_global_sync:
+        # real global sync: update server + push to reps
+        with torch.no_grad():
+            for layer_idx, p in enumerate(server_model.parameters()):
+                p.copy_(avg_params[layer_idx])
+            for m in reps:
+                for layer_idx, p in enumerate(m.parameters()):
+                    p.copy_(avg_params[layer_idx])
+    else:
+        # no global sync this round: evaluate the "virtual" global model without changing training state
+        backup_server_state = copy.deepcopy(server_model.state_dict())
+        with torch.no_grad():
+            for layer_idx, p in enumerate(server_model.parameters()):
+                p.copy_(avg_params[layer_idx])
+    
+    return do_global_sync, backup_server_state
+
 def fl_semidecentralized_cluster_train(server_model, client_data, comm_rounds,
                                        lr, momentum, local_iters, straggler_max_delay,
                                        testloader, main_test_type="eval_against_baselines",
@@ -366,6 +576,8 @@ def fl_semidecentralized_cluster_train(server_model, client_data, comm_rounds,
                                        intra_graph_p=0.2, intra_graph_seed=0, gossip_rounds=1,
                                        global_sync_E=1, cluster_sizes=None, cluster_schedule=None,
                                        reshuffle_clusters_each_round=False, clients_frac=1.0):
+    """Training a semidecentralized federated learning architecture"""
+   
     accuracies = []
     losses = []
     times = []
@@ -443,14 +655,7 @@ def fl_semidecentralized_cluster_train(server_model, client_data, comm_rounds,
             clients_in_current_cluster = clients_in_clusters_ls[cluster_idx]
 
             # partial participation: pick subset in this cluster
-            if clients_frac >= 1.0:
-                participating_idx = list(range(num_clients_in_current_cluster))
-            else:
-                n_part = int(np.floor(clients_frac * num_clients_in_current_cluster))
-                n_part = max(1, n_part)
-                participating_idx = participation_rng.choice(
-                    num_clients_in_current_cluster, size=n_part, replace=False
-                ).tolist()
+            participating_idx = get_participating_client_idxs(clients_frac, num_clients_in_current_cluster, participation_rng)
 
             # train only participating clients
             cluster_loss = train_cluster(
@@ -461,48 +666,15 @@ def fl_semidecentralized_cluster_train(server_model, client_data, comm_rounds,
             per_cluster_loss.append(cluster_loss)
 
             # gossip only among participating clients (non-participants stay untouched this round)
-            participating_models = [clients_in_current_cluster[i] for i in participating_idx]
-            for _ in range(gossip_rounds):
-                exchange_client_to_client_info(
-                    participating_models, len(participating_models),
-                    graph_type=intra_graph_type, k=intra_graph_k, p=intra_graph_p,
-                    seed=intra_graph_seed + current_round + cluster_idx
-                )
+            cluster_gossip(cluster_idx, clients_in_current_cluster, 
+                           participating_idx, gossip_rounds, current_round, 
+                           intra_graph_type, intra_graph_k, intra_graph_p, intra_graph_seed)
 
             # pick a random participating client from a cluster to use for parameter server aggregation
             chosen = int(participation_rng.choice(participating_idx, size=1)[0])
             randomly_chosen_clients.append(chosen)
-
-        # aggregate at the PS only every global_sync_E rounds
-        do_global_sync = (global_sync_E <= 1) or ((current_round + 1) % global_sync_E == 0)
-
-        # build the representative models (one per cluster)
-        reps = []
-        for cluster_idx, client_idx in enumerate(randomly_chosen_clients):
-            reps.append(clients_in_clusters_ls[cluster_idx][client_idx])
-
-        # compute the averaged "global" params from representatives (Welford-style mean)
-        avg_params = [torch.zeros_like(p) for p in reps[0].parameters()]
-        num_avged = 0
-        for m in reps:
-            num_avged += 1
-            for layer_idx, p in enumerate(m.parameters()):
-                avg_params[layer_idx] += (p - avg_params[layer_idx]) / num_avged
-
-        if do_global_sync:
-            # real global sync: update server + push to reps
-            with torch.no_grad():
-                for layer_idx, p in enumerate(server_model.parameters()):
-                    p.copy_(avg_params[layer_idx])
-                for m in reps:
-                    for layer_idx, p in enumerate(m.parameters()):
-                        p.copy_(avg_params[layer_idx])
-        else:
-            # no global sync this round: evaluate the "virtual" global model without changing training state
-            backup_server_state = copy.deepcopy(server_model.state_dict())
-            with torch.no_grad():
-                for layer_idx, p in enumerate(server_model.parameters()):
-                    p.copy_(avg_params[layer_idx])
+        
+        do_global_sync, backup_server_state = manage_global_sync(global_sync_E, current_round, randomly_chosen_clients, clients_in_clusters_ls, server_model)
 
         # our ending time (changes depending on whether we are enforcing straggler delay)
         if straggler_max_delay > 0:
@@ -532,6 +704,9 @@ def fl_semidecentralized_cluster_train(server_model, client_data, comm_rounds,
 
 def fl_fullydecentralized_cluster_train(starting_model, client_data, comm_rounds, lr, momentum,
                                         local_iters, straggler_max_delay, testloader, clients_frac=1.0):
+    
+    """Training a fully decentralized federated learning architecture"""
+
     accuracies = []
     losses = []
     times = []
@@ -569,12 +744,7 @@ def fl_fullydecentralized_cluster_train(starting_model, client_data, comm_rounds
         round_start_time = time.time()
 
         # sample participating clients
-        if clients_frac >= 1.0:
-            participating = list(range(num_of_clients))
-        else:
-            n_part = int(np.floor(clients_frac * num_of_clients))
-            n_part = max(1, n_part)
-            participating = rng.choice(num_of_clients, size=n_part, replace=False).tolist()
+        participating = get_participating_client_idxs(clients_frac, num_of_clients, rng)
 
         # train only participating clients
         all_client_loss = train_clients(client_list, client_opts, client_data, local_iters,
@@ -616,6 +786,9 @@ def fl_fullydecentralized_cluster_train(starting_model, client_data, comm_rounds
 
 def fl_centralized_train(server_model, client_data, comm_rounds, lr, momentum, local_iters,
                          straggler_max_delay, testloader, clients_frac=1.0):
+    
+    """Training a centralized federated learning architecture (can be adapted for fully sync or local iter SGD)"""
+    
     accuracies = []
     losses = []
     times = []
@@ -652,13 +825,8 @@ def fl_centralized_train(server_model, client_data, comm_rounds, lr, momentum, l
         # our starting time
         round_start_time = time.time()
 
-        # sample participating clients (global)
-        if clients_frac >= 1.0:
-            participating = list(range(num_of_clients))
-        else:
-            n_part = int(np.floor(clients_frac * num_of_clients))
-            n_part = max(1, n_part)
-            participating = rng.choice(num_of_clients, size=n_part, replace=False).tolist()
+        # get the participating client indexes
+        participating = get_participating_client_idxs(clients_frac, num_of_clients, rng)
 
         # train only participating clients
         all_client_loss = train_clients(client_list, client_opts, client_data, local_iters,

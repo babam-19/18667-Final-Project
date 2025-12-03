@@ -6,6 +6,7 @@ from plot_utils import plot_acc, plot_loss, plot_comm_times
 def test_cluster_framework_variations(test_type, args):
     
     if test_type.startswith("T1_eval_against_baselines"):
+        
         # Test Description:
         # In this test, we will be evaluating our framework's performance against the baselines (being decentralized server 
         # architecture with local iters and two central server gossip network architectures being fully sync SGD and local 
@@ -109,6 +110,7 @@ def test_cluster_framework_variations(test_type, args):
         plot_comm_times(times, test_type, plot_labels, n_clients, 'Communication Times w/ adapting num of clusters')
 
     elif test_type.startswith("T3_scale_up_num_of_clients"):
+        
         # Test Description:
         # In this test, we will be evaluating our framework's performance when we scale up the number of clients against the baseline
         # central server gossip network architecture. We scale up the number of clients to 150. We evaluate the accuracy, loss, and 
@@ -152,11 +154,17 @@ def test_cluster_framework_variations(test_type, args):
         plot_comm_times(times, test_type, plot_labels, n_clients, 'Communication Times w/ scaled up num of clients')
 
     elif test_type.startswith("T4_graph_connectivity"):
+        
+        # Test Description:
+        # In this test, we will be testing our framework under different types of graph connectivity.
+        # Types of graphs tested are dense, ring with degree 2, ring with degree 4, and random (an egde
+        # between 2 clients is chosen with a probability of 0.2). 
 
         n_clients = getattr(args, "n_clients", 50)
         num_clusters = getattr(args, "num_clusters", 5)
         configs = getattr(args, "connectivity_configs", [])
 
+        # get all of the client data and the testloader (this case is non-IID with alpha = 0.3)
         client_data, testloader = build_mnist(n_clients, args.iid_alpha, args.batch_size, seed=args.seed)
 
         accuracies, losses, times = [], [], []
@@ -183,14 +191,16 @@ def test_cluster_framework_variations(test_type, args):
             times.append(t)
             plot_labels.append(label)
 
+        # plot everything
         plot_acc(accuracies, test_type, plot_labels, n_clients, "Accuracy vs connectivity")
         plot_loss(losses, test_type, plot_labels, n_clients, "Loss vs connectivity")
         plot_comm_times(times, test_type, plot_labels, n_clients, "Comm time vs connectivity")
 
     elif test_type.startswith("T5_global_sync_frequency"):
+        
         # Test Description:
         # Global synchronization frequency E (sync every E rounds)
-        # plot accuracies for each E on the same graph.
+        # We then plot accuracies for each E on the same graph.
 
         n_clients = getattr(args, "n_clients", 50)
         num_clusters = getattr(args, "num_clusters", 5)
@@ -230,8 +240,10 @@ def test_cluster_framework_variations(test_type, args):
         plot_comm_times(times, test_type, plot_labels, n_clients, "Comm time vs global sync frequency (E)")
 
     elif test_type.startswith("T6_diff_num_of_clients_per_cluster"):
+        
         # Test Description:
         # Fixed number of total clients, but uneven cluster sizes vs equal-split baseline (same #clusters)
+        
         n_clients = getattr(args, "n_clients", 50)
         num_clusters = getattr(args, "num_clusters", 5)
         cluster_sizes = getattr(args, "cluster_sizes", None)
@@ -282,8 +294,10 @@ def test_cluster_framework_variations(test_type, args):
         plot_comm_times([t_uneven, t_equal], test_type, plot_labels, n_clients, "Comm time (uneven vs equal cluster sizes)")
 
     elif test_type.startswith("T7_diff_num_of_clusters_over_rounds"):
+        
         # Test Description:
         # Change number of clusters over rounds using a schedule vs fixed-#clusters baseline.
+        
         n_clients = getattr(args, "n_clients", 50)
         cluster_schedule = getattr(args, "cluster_schedule", None)
         if cluster_schedule is None:
@@ -341,6 +355,7 @@ def test_cluster_framework_variations(test_type, args):
         plot_comm_times([t_dyn, t_fix], test_type, plot_labels, n_clients, "Comm time (dynamic vs fixed #clusters)")
 
     elif test_type.startswith("T8_partial_participation"):
+        
         # Test Description:
         # Test different clients_frac (partial participation) and plot the results
 
